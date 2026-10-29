@@ -3,6 +3,7 @@
 #include <memory>
 #include <vector>
 #include <stdexcept>
+#include <unordered_map>
 
 template <typename T> 
 struct TensorData {
@@ -21,7 +22,7 @@ class Tensor {
   Tensor(std::shared_ptr<TensorData<T>> data) {
     this->data = data;
   }
-    
+
   public:
     Tensor(T data) {
       this->data = std::make_shared<TensorData<T>>();
@@ -70,7 +71,7 @@ class Tensor {
       std::pair<std::shared_ptr<TensorData<T>>, std::shared_ptr<TensorData<T>>> children(this->data, rhs.data);
       new_tensor_data->children = children;
 
-      new_tensor_data->grad.assign(this->data->grad.size(), 0.0);
+      new_tensor_data->grad.assign(this->data->data.size(), 0.0);
       new_tensor_data->back = [lhs = this->data, rhs = rhs.data, res = std::weak_ptr<TensorData<T>>(new_tensor_data)]() -> void {
         std::shared_ptr<TensorData<T>> resData = res.lock();
         for (int i = 0; i < resData->data.size(); i++) {
@@ -80,5 +81,49 @@ class Tensor {
       };
 
       return Tensor<T>(new_tensor_data);
+    }
+
+    void backward() {
+      this->data->grad.assign(this->data->grad.size(), 1.0);
+
+      // Kahn's topological sort
+      std::vector<TensorData<T>*> nodes;
+
+      std::unordered_map<TensorData<T>*, int> consumers;
+
+      std::vector<TensorData<T>*> dfs;
+      dfs.push_back(this->data.get());
+
+      while (!dfs.empty()) {
+        TensorData<T>* curr = dfs.back();
+        dfs.pop_back();
+
+        if (curr->children.first != nullptr) {
+          if (consumers[curr->children.first.get()]++ == 0) {
+            dfs.push_back(curr->children.first.get());
+          }
+        }
+
+        if (curr->children.second != nullptr) {
+          if (consumers[curr->children.second.get()]++ == 0) {
+            dfs.push_back(curr->children.second.get());
+          }
+        }
+      }
+
+      nodes.push_back(this->data.get());
+
+      while (!nodes.empty()) {
+        TensorData<T>* curr = nodes.back();
+        nodes.pop_back();
+
+        if (curr->back)
+          curr->back();
+
+        if (curr->children.first != nullptr && --consumers[curr->children.first.get()] == 0)
+          nodes.push_back(curr->children.first.get());
+        if (curr->children.second != nullptr && --consumers[curr->children.second.get()] == 0)
+          nodes.push_back(curr->children.second.get());
+      }
     }
 };
